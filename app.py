@@ -404,7 +404,7 @@ def process_bilant(df_balanta, df_bilant):
 
 def create_output_excel(df_balanta, df_bilant):
     """
-    Create output Excel file with processed Balanta and Bilant.
+    Create output Excel file with processed Balanta, Bilant, and Dashboard.
     """
     output = io.BytesIO()
 
@@ -412,11 +412,184 @@ def create_output_excel(df_balanta, df_bilant):
         # Write Balanta with Sold Final
         df_balanta.to_excel(writer, sheet_name='Balanta', index=False)
 
-        # Write Bilant with calculations
-        df_bilant.to_excel(writer, sheet_name='Bilant', index=False)
+        # Write Bilant with calculations (exclude Formula_CT and Formula_RD columns)
+        columns_to_exclude = ['Formula_CT', 'Formula_RD']
+        df_bilant_export = df_bilant.drop(columns=[col for col in columns_to_exclude if col in df_bilant.columns])
+        df_bilant_export.to_excel(writer, sheet_name='Bilant', index=False)
+
+        # Calculate and write Dashboard
+        metrics = calculate_bi_metrics(df_bilant)
+
+        # Create Dashboard dataframe
+        dashboard_data = []
+
+        # Summary section
+        dashboard_data.append(['SUMAR FINANCIAR', '', ''])
+        dashboard_data.append(['Indicator', 'Valoare', ''])
+        dashboard_data.append(['Total Active', metrics['summary']['total_active'], ''])
+        dashboard_data.append(['Active Imobilizate', metrics['summary']['active_imobilizate'], ''])
+        dashboard_data.append(['Active Circulante', metrics['summary']['active_circulante'], ''])
+        dashboard_data.append(['Capitaluri Proprii', metrics['summary']['capitaluri_proprii'], ''])
+        dashboard_data.append(['Total Datorii', metrics['summary']['total_datorii'], ''])
+        dashboard_data.append(['', '', ''])
+
+        # Ratios section
+        dashboard_data.append(['INDICATORI FINANCIARI', '', ''])
+        dashboard_data.append(['Indicator', 'Valoare', 'Interpretare'])
+
+        ratio_labels = {
+            'lichiditate_curenta': ('Lichiditate Curenta', 'Ideal > 1'),
+            'lichiditate_rapida': ('Lichiditate Rapida', 'Ideal > 0.8'),
+            'lichiditate_imediata': ('Lichiditate Imediata', 'Ideal > 0.2'),
+            'solvabilitate': ('Solvabilitate (%)', 'Ideal > 50%'),
+            'indatorare': ('Indatorare (%)', 'Ideal < 50%'),
+            'autonomie_financiara': ('Autonomie Financiara (%)', 'Ideal > 50%')
+        }
+
+        for key, (label, interpretation) in ratio_labels.items():
+            val = metrics['ratios'].get(key)
+            val_str = str(val) if val is not None else 'N/A'
+            dashboard_data.append([label, val_str, interpretation])
+
+        dashboard_data.append(['', '', ''])
+
+        # Asset structure section
+        dashboard_data.append(['STRUCTURA ACTIVELOR', '', ''])
+        dashboard_data.append(['Component', 'Valoare', 'Procent'])
+        for item in metrics['structure']['assets']:
+            dashboard_data.append([item['name'], item['value'], f"{item['percent']}%"])
+
+        dashboard_data.append(['', '', ''])
+
+        # Liability structure section
+        dashboard_data.append(['STRUCTURA PASIVELOR', '', ''])
+        dashboard_data.append(['Component', 'Valoare', 'Procent'])
+        for item in metrics['structure']['liabilities']:
+            dashboard_data.append([item['name'], item['value'], f"{item['percent']}%"])
+
+        df_dashboard = pd.DataFrame(dashboard_data, columns=['A', 'B', 'C'])
+        df_dashboard.to_excel(writer, sheet_name='Dashboard', index=False, header=False)
+
+        # Format Dashboard sheet
+        workbook = writer.book
+        worksheet = writer.sheets['Dashboard']
+
+        # Set column widths
+        worksheet.column_dimensions['A'].width = 30
+        worksheet.column_dimensions['B'].width = 20
+        worksheet.column_dimensions['C'].width = 20
 
     output.seek(0)
     return output
+
+
+# =============================================================================
+# BI ANALYTICS
+# =============================================================================
+
+def calculate_bi_metrics(df_bilant):
+    """
+    Calculate Business Intelligence metrics from processed Bilant.
+    Returns key financial ratios and structure data for dashboard.
+    """
+    # Build nr_rd to value mapping
+    nr_rd_map = {}
+    for i, row in df_bilant.iterrows():
+        nr = str(row.iloc[1]).replace('.0', '') if pd.notna(row.iloc[1]) else ''
+        if nr:
+            val = row.iloc[2] if pd.notna(row.iloc[2]) else 0
+            nr_rd_map[nr] = val
+
+    # Key balance sheet positions (based on Romanian Bilant structure)
+    # Assets
+    active_imobilizate = nr_rd_map.get('25', 0)  # TOTAL ACTIVE IMOBILIZATE
+    active_circulante = nr_rd_map.get('40', 0)   # TOTAL ACTIVE CIRCULANTE
+    stocuri = nr_rd_map.get('30', 0)             # TOTAL Stocuri
+    creante = nr_rd_map.get('37', 0)             # TOTAL Creante
+    disponibilitati = nr_rd_map.get('39', 0)     # Casa si conturi la banci
+    total_active = nr_rd_map.get('41', 0)        # TOTAL ACTIVE
+
+    # Liabilities
+    datorii_termen_scurt = nr_rd_map.get('54', 0)  # Datorii < 1 an
+    datorii_termen_lung = nr_rd_map.get('55', 0)   # Datorii > 1 an
+    total_datorii = datorii_termen_scurt + datorii_termen_lung
+
+    # Equity
+    capitaluri_proprii = nr_rd_map.get('101', 0)   # CAPITALURI PROPRII TOTAL
+    capital_social = nr_rd_map.get('81', 0)       # Capital subscris varsat
+
+    # Calculate ratios
+    metrics = {
+        'summary': {
+            'total_active': total_active,
+            'active_imobilizate': active_imobilizate,
+            'active_circulante': active_circulante,
+            'capitaluri_proprii': capitaluri_proprii,
+            'total_datorii': total_datorii
+        },
+        'ratios': {},
+        'structure': {
+            'assets': [],
+            'liabilities': []
+        }
+    }
+
+    # Financial ratios
+    # 1. Lichiditate curenta (Current Ratio) = Active Circulante / Datorii < 1 an
+    if datorii_termen_scurt > 0:
+        metrics['ratios']['lichiditate_curenta'] = round(active_circulante / datorii_termen_scurt, 2)
+    else:
+        metrics['ratios']['lichiditate_curenta'] = None
+
+    # 2. Lichiditate rapida (Quick Ratio) = (Active Circulante - Stocuri) / Datorii < 1 an
+    if datorii_termen_scurt > 0:
+        metrics['ratios']['lichiditate_rapida'] = round((active_circulante - stocuri) / datorii_termen_scurt, 2)
+    else:
+        metrics['ratios']['lichiditate_rapida'] = None
+
+    # 3. Lichiditate imediata (Cash Ratio) = Disponibilitati / Datorii < 1 an
+    if datorii_termen_scurt > 0:
+        metrics['ratios']['lichiditate_imediata'] = round(disponibilitati / datorii_termen_scurt, 2)
+    else:
+        metrics['ratios']['lichiditate_imediata'] = None
+
+    # 4. Rata solvabilitatii (Solvency) = Capitaluri Proprii / Total Active
+    if total_active > 0:
+        metrics['ratios']['solvabilitate'] = round(capitaluri_proprii / total_active * 100, 1)
+    else:
+        metrics['ratios']['solvabilitate'] = None
+
+    # 5. Rata indatorarii (Debt Ratio) = Total Datorii / Total Active
+    if total_active > 0:
+        metrics['ratios']['indatorare'] = round(total_datorii / total_active * 100, 1)
+    else:
+        metrics['ratios']['indatorare'] = None
+
+    # 6. Autonomie financiara = Capitaluri Proprii / (Capitaluri Proprii + Datorii)
+    total_pasive = capitaluri_proprii + total_datorii
+    if total_pasive > 0:
+        metrics['ratios']['autonomie_financiara'] = round(capitaluri_proprii / total_pasive * 100, 1)
+    else:
+        metrics['ratios']['autonomie_financiara'] = None
+
+    # Asset structure for charts
+    if total_active > 0:
+        metrics['structure']['assets'] = [
+            {'name': 'Active Imobilizate', 'value': active_imobilizate, 'percent': round(active_imobilizate / total_active * 100, 1)},
+            {'name': 'Stocuri', 'value': stocuri, 'percent': round(stocuri / total_active * 100, 1)},
+            {'name': 'Creante', 'value': creante, 'percent': round(creante / total_active * 100, 1)},
+            {'name': 'Disponibilitati', 'value': disponibilitati, 'percent': round(disponibilitati / total_active * 100, 1)}
+        ]
+
+    # Liability structure for charts
+    if total_pasive > 0:
+        metrics['structure']['liabilities'] = [
+            {'name': 'Capitaluri Proprii', 'value': capitaluri_proprii, 'percent': round(capitaluri_proprii / total_pasive * 100, 1)},
+            {'name': 'Datorii < 1 an', 'value': datorii_termen_scurt, 'percent': round(datorii_termen_scurt / total_pasive * 100, 1)},
+            {'name': 'Datorii > 1 an', 'value': datorii_termen_lung, 'percent': round(datorii_termen_lung / total_pasive * 100, 1)}
+        ]
+
+    return metrics
 
 
 # =============================================================================
@@ -474,6 +647,45 @@ def upload_file():
 @app.route('/health')
 def health():
     return jsonify({'status': 'healthy'})
+
+
+@app.route('/analyze', methods=['POST'])
+def analyze_file():
+    """Process file and return BI metrics for dashboard."""
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file uploaded'}), 400
+
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'error': 'No file selected'}), 400
+
+    if not file.filename.endswith(('.xlsx', '.xls')):
+        return jsonify({'error': 'Invalid file type. Please upload an Excel file.'}), 400
+
+    try:
+        # Read the Excel file
+        xlsx = pd.ExcelFile(file)
+
+        # Check for required sheets
+        if 'Balanta' not in xlsx.sheet_names:
+            return jsonify({'error': 'Sheet "Balanta" not found in the file'}), 400
+        if 'Bilant' not in xlsx.sheet_names:
+            return jsonify({'error': 'Sheet "Bilant" not found in the file'}), 400
+
+        # Read sheets
+        df_balanta = pd.read_excel(xlsx, sheet_name='Balanta')
+        df_bilant = pd.read_excel(xlsx, sheet_name='Bilant')
+
+        # Process
+        df_balanta_processed, df_bilant_processed = process_bilant(df_balanta, df_bilant)
+
+        # Calculate BI metrics
+        metrics = calculate_bi_metrics(df_bilant_processed)
+
+        return jsonify(metrics)
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/template')

@@ -215,6 +215,36 @@
             color: #7f8c8d;
             font-size: 14px;
         }
+
+        .bi-dashboard { display: none; margin-top: 30px; }
+        .bi-dashboard.show { display: block; }
+        .bi-title { text-align: center; color: #2c3e50; margin-bottom: 20px; border-bottom: 2px solid #3498db; padding-bottom: 10px; }
+        .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; margin-bottom: 20px; }
+        .metric-card { background: linear-gradient(135deg, #667eea, #764ba2); color: white; padding: 15px; border-radius: 8px; text-align: center; }
+        .metric-card.green { background: linear-gradient(135deg, #11998e, #38ef7d); }
+        .metric-card.blue { background: linear-gradient(135deg, #2193b0, #6dd5ed); }
+        .metric-card.orange { background: linear-gradient(135deg, #f5af19, #f12711); }
+        .metric-value { font-size: 20px; font-weight: bold; }
+        .metric-label { font-size: 11px; opacity: 0.9; }
+        .ratios-section { background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 15px; }
+        .ratios-section h3 { margin: 0 0 15px 0; color: #2c3e50; font-size: 16px; }
+        .ratio-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+        .ratio-item { display: flex; justify-content: space-between; padding: 8px; background: white; border-radius: 4px; }
+        .ratio-name { color: #555; font-size: 13px; }
+        .ratio-value { font-weight: bold; font-size: 13px; }
+        .ratio-value.good { color: #27ae60; }
+        .ratio-value.warning { color: #f39c12; }
+        .ratio-value.bad { color: #e74c3c; }
+        .charts-section { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+        .chart-box { background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .chart-box h4 { margin: 0 0 10px 0; color: #2c3e50; font-size: 14px; }
+        .bar-item { margin-bottom: 8px; }
+        .bar-label { font-size: 11px; color: #555; margin-bottom: 3px; }
+        .bar-bg { background: #e9ecef; border-radius: 4px; height: 20px; }
+        .bar-fill { height: 100%; border-radius: 4px; padding-left: 6px; font-size: 10px; color: white; display: flex; align-items: center; min-width: 30px; }
+        .bar-fill.a { background: #667eea; }
+        .bar-fill.l { background: #11998e; }
+        @media (max-width: 600px) { .charts-section { grid-template-columns: 1fr; } }
     </style>
 </head>
 <body>
@@ -248,6 +278,25 @@
         </form>
 
         <div class="status" id="status"></div>
+
+        <div class="bi-dashboard" id="biDashboard">
+            <h2 class="bi-title">Dashboard Analiza Financiara</h2>
+            <div class="metrics-grid" id="metricsGrid"></div>
+            <div class="ratios-section">
+                <h3>Indicatori Financiari</h3>
+                <div class="ratio-grid" id="ratiosGrid"></div>
+            </div>
+            <div class="charts-section">
+                <div class="chart-box">
+                    <h4>Structura Activelor</h4>
+                    <div id="assetsChart"></div>
+                </div>
+                <div class="chart-box">
+                    <h4>Structura Pasivelor</h4>
+                    <div id="liabilitiesChart"></div>
+                </div>
+            </div>
+        </div>
 
         <div class="instructions">
             <h3>Instrucțiuni</h3>
@@ -352,6 +401,14 @@
 
                     status.className = 'status show success';
                     status.textContent = '✓ Bilanțul a fost generat cu succes! Fișierul se descarcă...';
+
+                    // Fetch BI metrics
+                    const formData2 = new FormData(form);
+                    const biResponse = await fetch('/analyze', { method: 'POST', body: formData2 });
+                    if (biResponse.ok) {
+                        const metrics = await biResponse.json();
+                        renderDashboard(metrics);
+                    }
                 } else {
                     const error = await response.json();
                     throw new Error(error.error || 'Eroare la procesare');
@@ -363,6 +420,68 @@
 
             submitBtn.disabled = false;
         });
+
+        function formatNumber(num) {
+            if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+            if (num >= 1000) return (num / 1000).toFixed(0) + 'K';
+            return num.toFixed(0);
+        }
+
+        function renderDashboard(data) {
+            const dashboard = document.getElementById('biDashboard');
+            const metricsGrid = document.getElementById('metricsGrid');
+            const ratiosGrid = document.getElementById('ratiosGrid');
+            const assetsChart = document.getElementById('assetsChart');
+            const liabilitiesChart = document.getElementById('liabilitiesChart');
+
+            // Summary metrics
+            metricsGrid.innerHTML = `
+                <div class="metric-card"><div class="metric-value">${formatNumber(data.summary.total_active)}</div><div class="metric-label">Total Active</div></div>
+                <div class="metric-card green"><div class="metric-value">${formatNumber(data.summary.capitaluri_proprii)}</div><div class="metric-label">Capitaluri Proprii</div></div>
+                <div class="metric-card blue"><div class="metric-value">${formatNumber(data.summary.active_circulante)}</div><div class="metric-label">Active Circulante</div></div>
+                <div class="metric-card orange"><div class="metric-value">${formatNumber(data.summary.total_datorii)}</div><div class="metric-label">Total Datorii</div></div>
+            `;
+
+            // Ratios
+            const ratioLabels = {
+                lichiditate_curenta: 'Lichiditate Curenta',
+                lichiditate_rapida: 'Lichiditate Rapida',
+                lichiditate_imediata: 'Lichiditate Imediata',
+                solvabilitate: 'Solvabilitate (%)',
+                indatorare: 'Indatorare (%)',
+                autonomie_financiara: 'Autonomie Financiara (%)'
+            };
+
+            let ratiosHtml = '';
+            for (const [key, label] of Object.entries(ratioLabels)) {
+                const val = data.ratios[key];
+                let cls = '';
+                if (key.includes('lichiditate')) {
+                    cls = val >= 1 ? 'good' : val >= 0.5 ? 'warning' : 'bad';
+                } else if (key === 'solvabilitate' || key === 'autonomie_financiara') {
+                    cls = val >= 50 ? 'good' : val >= 30 ? 'warning' : 'bad';
+                } else if (key === 'indatorare') {
+                    cls = val <= 50 ? 'good' : val <= 70 ? 'warning' : 'bad';
+                }
+                ratiosHtml += `<div class="ratio-item"><span class="ratio-name">${label}</span><span class="ratio-value ${cls}">${val !== null ? val : 'N/A'}</span></div>`;
+            }
+            ratiosGrid.innerHTML = ratiosHtml;
+
+            // Charts
+            let assetsHtml = '';
+            data.structure.assets.forEach(item => {
+                assetsHtml += `<div class="bar-item"><div class="bar-label">${item.name}</div><div class="bar-bg"><div class="bar-fill a" style="width:${item.percent}%">${item.percent}%</div></div></div>`;
+            });
+            assetsChart.innerHTML = assetsHtml;
+
+            let liabHtml = '';
+            data.structure.liabilities.forEach(item => {
+                liabHtml += `<div class="bar-item"><div class="bar-label">${item.name}</div><div class="bar-bg"><div class="bar-fill l" style="width:${item.percent}%">${item.percent}%</div></div></div>`;
+            });
+            liabilitiesChart.innerHTML = liabHtml;
+
+            dashboard.classList.add('show');
+        }
     </script>
 </body>
 </html>
