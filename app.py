@@ -502,12 +502,14 @@ def calculate_bi_metrics(df_bilant):
 
     # Key balance sheet positions (based on Romanian Bilant structure)
     # Assets
-    active_imobilizate = nr_rd_map.get('25', 0)  # TOTAL ACTIVE IMOBILIZATE
-    active_circulante = nr_rd_map.get('40', 0)   # TOTAL ACTIVE CIRCULANTE
+    active_imobilizate = nr_rd_map.get('25', 0)  # ACTIVE IMOBILIZATE - TOTAL
+    active_circulante = nr_rd_map.get('42', 0)   # ACTIVE CIRCULANTE - TOTAL
     stocuri = nr_rd_map.get('30', 0)             # TOTAL Stocuri
-    creante = nr_rd_map.get('37', 0)             # TOTAL Creante
+    creante = nr_rd_map.get('40', 0)             # TOTAL Creante (rd. 37 + 38)
     disponibilitati = nr_rd_map.get('39', 0)     # Casa si conturi la banci
-    total_active = nr_rd_map.get('41', 0)        # TOTAL ACTIVE
+
+    # Total Active = Active Imobilizate + Active Circulante
+    total_active = active_imobilizate + active_circulante
 
     # Liabilities
     datorii_termen_scurt = nr_rd_map.get('54', 0)  # Datorii < 1 an
@@ -515,7 +517,7 @@ def calculate_bi_metrics(df_bilant):
     total_datorii = datorii_termen_scurt + datorii_termen_lung
 
     # Equity
-    capitaluri_proprii = nr_rd_map.get('101', 0)   # CAPITALURI PROPRII TOTAL
+    capitaluri_proprii = nr_rd_map.get('101', 0)   # CAPITALURI PROPRII - TOTAL
     capital_social = nr_rd_map.get('81', 0)       # Capital subscris varsat
 
     # Calculate ratios
