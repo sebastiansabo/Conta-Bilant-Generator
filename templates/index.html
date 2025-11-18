@@ -99,6 +99,28 @@
             cursor: not-allowed;
         }
 
+        .btn-secondary {
+            background: #95a5a6;
+            text-decoration: none;
+        }
+
+        .btn-secondary:hover {
+            background: #7f8c8d;
+        }
+
+        .template-section {
+            text-align: center;
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #e8f4f8;
+            border-radius: 6px;
+        }
+
+        .template-section p {
+            margin: 0 0 10px 0;
+            color: #555;
+        }
+
         .file-info {
             margin-top: 20px;
             padding: 15px;
@@ -199,6 +221,11 @@
     <div class="container">
         <h1>Generator Bilanț</h1>
         <p class="subtitle">Generează bilanțul contabil din balanța de verificare</p>
+
+        <div class="template-section">
+            <p>Nu ai un fișier? Descarcă șablonul pentru a vedea formatul corect:</p>
+            <a href="/template" class="btn btn-secondary">Descarcă Șablon Excel</a>
+        </div>
 
         <form id="uploadForm" enctype="multipart/form-data">
             <div class="upload-area" id="uploadArea">

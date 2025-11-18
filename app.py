@@ -13,12 +13,13 @@ from werkzeug.utils import secure_filename
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, Border, Side
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder='static')
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 app.config['UPLOAD_FOLDER'] = 'uploads'
 
-# Ensure upload folder exists
+# Ensure folders exist
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+os.makedirs('static', exist_ok=True)
 
 # =============================================================================
 # CONSTANTS - Match VBA macro layout
@@ -445,6 +446,21 @@ def upload_file():
 @app.route('/health')
 def health():
     return jsonify({'status': 'healthy'})
+
+
+@app.route('/template')
+def download_template():
+    """Download the template Excel file."""
+    template_path = os.path.join(app.static_folder, 'template_balanta.xlsx')
+    if os.path.exists(template_path):
+        return send_file(
+            template_path,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name='Template_Balanta_Bilant.xlsx'
+        )
+    else:
+        return jsonify({'error': 'Template file not found'}), 404
 
 
 if __name__ == '__main__':
