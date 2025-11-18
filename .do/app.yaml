@@ -1,0 +1,19 @@
+# DigitalOcean App Platform Spec
+name: bilant-generator
+
+services:
+  - name: web
+    github:
+      repo: YOUR_GITHUB_USERNAME/Bilant-Generator
+      branch: main
+      deploy_on_push: true
+    dockerfile_path: Dockerfile
+    http_port: 8080
+    instance_count: 1
+    instance_size_slug: basic-xxs
+    routes:
+      - path: /
+    health_check:
+      http_path: /health
+      initial_delay_seconds: 10
+      period_seconds: 30
