@@ -22,20 +22,19 @@ os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 os.makedirs('static', exist_ok=True)
 
 # =============================================================================
-# CONSTANTS - Match VBA macro layout
+# CONSTANTS - Match template layout
 # =============================================================================
 
 # Balanta layout (0-indexed for pandas)
-COL_BAL_ACCOUNT = 1   # B = Nr. cont (RAD1)
-COL_BAL_SFD = 4       # E = SFD
-COL_BAL_SFC = 5       # F = SFC
+# New template: sal_sa, Cont, SFD, SFC, ...
+COL_BAL_ACCOUNT = 1   # B = Cont (account number)
+COL_BAL_SFD = 2       # C = SFD
+COL_BAL_SFC = 3       # D = SFC
 
 # Bilant layout
 COL_BIL_DESC = 0      # A = Denumirea elementului
 COL_BIL_NR_RD = 2     # C = Nr. rd.
-COL_BIL_VAL = 4       # E = Sold Final
-COL_BIL_FORM_CT = 5   # F = Formula Calcul
-COL_BIL_FORM_RD = 6   # G = Formula Randuri
+COL_BIL_VAL = 3       # D = Sold Final
 
 
 # =============================================================================
@@ -363,8 +362,11 @@ def process_bilant(df_balanta, df_bilant):
             if nr_rd:
                 bilant_values[nr_rd] = val
 
-    # Add results to dataframe
-    df_bilant['Calculated_Value'] = results
+    # Write results to the Sold Final column (COL_BIL_VAL)
+    col_name = df_bilant.columns[COL_BIL_VAL]
+    df_bilant[col_name] = results
+
+    # Add verification as new column
     df_bilant['Verification'] = verifications
 
     return df_balanta, df_bilant
