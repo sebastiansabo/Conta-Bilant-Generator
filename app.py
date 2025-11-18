@@ -26,53 +26,30 @@ os.makedirs('static', exist_ok=True)
 # =============================================================================
 
 # Balanta layout (0-indexed for pandas)
-# New template: sal_sa, Cont, SFD, SFC, ...
-COL_BAL_ACCOUNT = 1   # B = Cont (account number)
-COL_BAL_SFD = 2       # C = SFD
-COL_BAL_SFC = 3       # D = SFC
+# Template: Cont, SFD, SFC (3 columns only)
+COL_BAL_ACCOUNT = 0   # A = Cont (account number)
+COL_BAL_SFD = 1       # B = SFD
+COL_BAL_SFC = 2       # C = SFC
 
 # Bilant layout
 COL_BIL_DESC = 0      # A = Denumirea elementului
-COL_BIL_NR_RD = 2     # C = Nr. rd.
-COL_BIL_VAL = 3       # D = Sold Final
+COL_BIL_NR_RD = 1     # B = Nr. rd.
+COL_BIL_VAL = 2       # C = Sold Final
 
 
 # =============================================================================
-# STEP 1: Calculate Sold Final in Balanta
+# STEP 1: Prepare Balanta data
 # =============================================================================
 
-def calculate_sold_final(df_balanta):
+def prepare_balanta(df_balanta):
     """
-    Calculate Sold Final for each account in Balanta.
-    Sold Final = SFD + SFC (absolute sum for display purposes)
-    Also calculates Net Balance = SFD - SFC for accounting purposes
+    Prepare Balanta dataframe by skipping header row if present.
     """
     df = df_balanta.copy()
 
     # Skip header row if present
-    if df.iloc[0, COL_BAL_ACCOUNT] == 'Cont':
+    if len(df) > 0 and df.iloc[0, COL_BAL_ACCOUNT] == 'Cont':
         df = df.iloc[1:].reset_index(drop=True)
-
-    sold_final = []
-    net_balance = []
-
-    for idx, row in df.iterrows():
-        sfd = pd.to_numeric(row.iloc[COL_BAL_SFD], errors='coerce')
-        sfc = pd.to_numeric(row.iloc[COL_BAL_SFC], errors='coerce')
-
-        sfd = 0 if pd.isna(sfd) else sfd
-        sfc = 0 if pd.isna(sfc) else sfc
-
-        # Sold Final as absolute sum (for prefix matching)
-        sf = abs(sfd) + abs(sfc)
-        sold_final.append(sf)
-
-        # Net balance for actual accounting
-        net = sfd - sfc
-        net_balance.append(net)
-
-    df['Sold_Final'] = sold_final
-    df['Net_Balance'] = net_balance
 
     return df
 
@@ -85,22 +62,35 @@ def extract_ct_formula(description):
     """
     Extract account formula from description text.
     Example: "1.Cheltuieli de constituire (ct.201-2801)" -> "201-2801"
+    Based on VBA GetCtExpression: finds "ct." then extracts until ")"
     """
     if pd.isna(description):
         return ""
 
     text = str(description)
 
-    # Find "ct." or "ct " followed by formula
-    match = re.search(r'ct\.?\s*([^)]+)', text, re.IGNORECASE)
+    # Find "ct." position (case insensitive)
+    # MUST have the dot to avoid matching "ct" in words like "active"
+    match = re.search(r'ct\.\s*', text, re.IGNORECASE)
     if not match:
         return ""
 
-    expr = match.group(1).strip()
+    # Start position after "ct." and any spaces
+    start_pos = match.end()
 
-    # Clean up the expression
-    expr = re.sub(r'\s+', '', expr)  # Remove whitespace
+    # Find closing parenthesis
+    paren_pos = text.find(')', start_pos)
+    if paren_pos == -1:
+        paren_pos = len(text)
+
+    # Extract the expression
+    expr = text[start_pos:paren_pos].strip()
+
+    # Clean up the expression (NormalizeCtFormula from VBA)
     expr = expr.replace('*', '')     # Remove asterisks
+    expr = re.sub(r'\s+', '', expr)  # Remove whitespace
+    expr = expr.replace('\r', '')    # Remove carriage return
+    expr = expr.replace('\n', '')    # Remove newline
 
     return expr
 
@@ -113,6 +103,7 @@ def extract_row_formula(description):
     """
     Extract row formula from description text.
     Example: "TOTAL (rd. 01 la 06)" -> "01+02+03+04+05+06"
+    Example: "TOTAL (rd. 31 la 35 +35a)" -> "31+32+33+34+35+35a"
     """
     if pd.isna(description):
         return ""
@@ -127,7 +118,7 @@ def extract_row_formula(description):
     raw = match.group(1).strip()
     raw = re.sub(r'\s+', '', raw)
 
-    # Handle "01 la 06" format
+    # Handle "01 la 06" format - expand the range first
     la_match = re.search(r'(\d+)la(\d+)', raw)
     if la_match:
         start = int(la_match.group(1))
@@ -136,10 +127,18 @@ def extract_row_formula(description):
 
         if end >= start:
             parts = [str(i).zfill(width) for i in range(start, end + 1)]
-            return '+'.join(parts)
+            expanded = '+'.join(parts)
+            # Replace the "XXlaYY" with expanded form, keep any additional terms
+            raw = raw[:la_match.start()] + expanded + raw[la_match.end():]
 
-    # Otherwise extract numbers and signs
-    result = re.sub(r'[^0-9+\-]', '', raw)
+    # Extract row references (numbers with optional letter suffix) and signs
+    # Keep alphanumeric row references like "35a"
+    result = re.sub(r'[^0-9a-z+\-]', '', raw)
+
+    # Convert alphanumeric references like "35a" to numeric "36"
+    # This handles template errors where "35a" should actually be "36"
+    result = re.sub(r'35a', '36', result)
+
     return result
 
 
@@ -223,15 +222,20 @@ def sum_accounts_by_prefix(df_balanta, prefix, use_net=False):
 
     for idx, row in df_balanta.iterrows():
         acct = str(row.iloc[COL_BAL_ACCOUNT])
+        # Clean up account number (remove .0 suffix if present)
+        if acct.endswith('.0'):
+            acct = acct[:-2]
+
         if acct.startswith(prefix):
+            sfd = pd.to_numeric(row.iloc[COL_BAL_SFD], errors='coerce') or 0
+            sfc = pd.to_numeric(row.iloc[COL_BAL_SFC], errors='coerce') or 0
+
             if use_net:
                 # For dynamic +/- terms: use SFD - SFC
-                sfd = pd.to_numeric(row.iloc[COL_BAL_SFD], errors='coerce') or 0
-                sfc = pd.to_numeric(row.iloc[COL_BAL_SFC], errors='coerce') or 0
                 val = sfd - sfc
             else:
-                # For normal terms: use Sold Final (SFD + SFC)
-                val = row.get('Sold_Final', 0) or 0
+                # For normal terms: use abs(SFD) + abs(SFC)
+                val = abs(sfd) + abs(sfc)
 
             total += val
             details.append((acct, val))
@@ -251,18 +255,30 @@ def eval_ct_expression(expr, df_balanta):
         if sign_type == 'dynamic':
             # +/- means SFD - SFC per account
             subtotal, details = sum_accounts_by_prefix(df_balanta, prefix, use_net=True)
-            for acct, val in details:
-                all_details.append((acct, val, prefix, 'dynamic'))
+            if not details:
+                # No accounts found for this prefix
+                all_details.append((prefix, 'No Val.', prefix, 'dynamic'))
+            else:
+                for acct, val in details:
+                    all_details.append((acct, val, prefix, 'dynamic'))
             total += subtotal
         elif sign_type == 'normal_plus':
             subtotal, details = sum_accounts_by_prefix(df_balanta, prefix, use_net=False)
-            for acct, val in details:
-                all_details.append((acct, val, prefix, '+'))
+            if not details:
+                # No accounts found for this prefix
+                all_details.append((prefix, 'No Val.', prefix, '+'))
+            else:
+                for acct, val in details:
+                    all_details.append((acct, val, prefix, '+'))
             total += subtotal
         elif sign_type == 'normal_minus':
             subtotal, details = sum_accounts_by_prefix(df_balanta, prefix, use_net=False)
-            for acct, val in details:
-                all_details.append((acct, -val, prefix, '-'))
+            if not details:
+                # No accounts found for this prefix
+                all_details.append((prefix, 'No Val.', prefix, '-'))
+            else:
+                for acct, val in details:
+                    all_details.append((acct, -val, prefix, '-'))
             total -= subtotal
 
     return total, all_details
@@ -276,23 +292,30 @@ def eval_row_formula(expr, bilant_values):
     """
     Evaluate row formula referencing other Bilant rows.
     bilant_values: dict mapping Nr.rd -> value
+    Handles alphanumeric row references like "35a"
     """
     if not expr:
         return 0
 
     total = 0
     sign = 1
-    num = ''
+    row_ref = ''
 
-    for ch in expr + '+':  # Add + to flush last number
-        if ch.isdigit():
-            num += ch
+    for ch in expr + '+':  # Add + to flush last reference
+        if ch.isdigit() or ch.isalpha():
+            row_ref += ch
         elif ch in '+-':
-            if num:
-                row_num = num.lstrip('0') or '0'
+            if row_ref:
+                # Strip leading zeros from numeric part but keep letters
+                # "035a" -> "35a", "01" -> "1"
+                match = re.match(r'^0*(\d+[a-z]*)$', row_ref)
+                if match:
+                    row_num = match.group(1) or '0'
+                else:
+                    row_num = row_ref
                 val = bilant_values.get(row_num, 0)
                 total += sign * val
-                num = ''
+                row_ref = ''
             sign = 1 if ch == '+' else -1
 
     return total
@@ -306,8 +329,8 @@ def process_bilant(df_balanta, df_bilant):
     """
     Process Balanta and generate Bilant with calculations and verification.
     """
-    # Step 1: Calculate Sold Final in Balanta
-    df_balanta = calculate_sold_final(df_balanta)
+    # Step 1: Prepare Balanta data
+    df_balanta = prepare_balanta(df_balanta)
 
     # Prepare Bilant dataframe
     df_bilant = df_bilant.copy()
@@ -336,7 +359,10 @@ def process_bilant(df_balanta, df_bilant):
             # Build verification string
             verif_lines = []
             for acct, acct_val, prefix, sign_type in details:
-                verif_lines.append(f"{acct} = {acct_val:.2f}")
+                if acct_val == 'No Val.':
+                    verif_lines.append(f"{acct} = No Val.")
+                else:
+                    verif_lines.append(f"{acct} = {acct_val:.2f}")
             verification = '\n'.join(verif_lines)
 
         results.append(val)
